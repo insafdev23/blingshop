@@ -407,7 +407,13 @@ async function initDB() {
   }
 }
 
-initDB().then(() => {
+// Initialize database connection
+initDB().catch(err => {
+  console.error("Failed to connect to database:", err.message);
+});
+
+// Only bind a network port when running locally (not inside Vercel serverless)
+if (!process.env.VERCEL) {
   const server = sslOptions
     ? https.createServer(sslOptions, app)
     : http.createServer(app);
@@ -420,11 +426,6 @@ initDB().then(() => {
     console.log(`  Database : MySQL (${process.env.DB_NAME || "blingshop"})`);
     console.log("─────────────────────────────────────────────");
   });
-}).catch(err => {
-  console.error("Failed to connect to database:", err.message);
-  console.error("Check your .env file and make sure MySQL is running.");
-  process.exit(1);
-});
+}
+
 module.exports = app;
-// or if your package.json uses "type": "module":
-// export default app;
