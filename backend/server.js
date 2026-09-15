@@ -425,3 +425,5 @@ initDB().then(() => {
   console.error("Check your .env file and make sure MySQL is running.");
   process.exit(1);
 });
+export default app; 
+// (or if your project uses CommonJS require: module.exports = app;)

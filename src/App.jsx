@@ -46,11 +46,7 @@ const BIZ_STYLE = {
 };
 
 // ── API ───────────────────────────────────────────────────────────
-const API = import.meta.env.VITE_API_URL || (
-  window.location.hostname === "localhost"
-    ? "https://localhost:3001"
-    : `https://${window.location.hostname}:3001`
-);
+const API = "/api";
 
 async function apiFetch(path, options = {}) {
   const res = await fetch(`${API}${path}`, {
