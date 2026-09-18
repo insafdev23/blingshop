@@ -13,6 +13,16 @@ const bcrypt   = require("bcryptjs");
 const app  = express();
 const PORT = process.env.PORT || 3001;
 
+// Strip leading /api prefix so routes match seamlessly on Vercel
+app.use((req, res, next) => {
+  if (req.url.startsWith('/api')) {
+    req.url = req.url.replace(/^\/api/, '') || '/';
+  }
+  next();
+});
+
+// ... your route definitions come below here (e.g. app.post('/auth/login', ...))
+
 // ── SSL certs ────────────────────────────────────────────────────
 let sslOptions = null;
 const certFile = path.join(__dirname, "localhost+1.pem");
