@@ -15,5 +15,12 @@ export default defineConfig({
     https: hasCerts
       ? { cert: fs.readFileSync(certFile), key: fs.readFileSync(keyFile) }
       : false,
+    proxy: {
+      "/api": {
+        target: hasCerts ? "https://localhost:3001" : "http://localhost:3001",
+        changeOrigin: true,
+        secure: false,
+      },
+    },
   },
 });

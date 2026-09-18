@@ -1,4 +1,5 @@
-require("dotenv").config();
+const path     = require("path");
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 const express  = require("express");
 const cors     = require("cors");
@@ -6,7 +7,6 @@ const mysql    = require("mysql2/promise");
 const https    = require("https");
 const http     = require("http");
 const fs       = require("fs");
-const path     = require("path");
 const net      = require("net");
 const bcrypt   = require("bcryptjs");
 
@@ -16,7 +16,10 @@ const PORT = process.env.PORT || 3001;
 // Strip leading /api prefix so routes match seamlessly on Vercel
 app.use((req, res, next) => {
   if (req.url.startsWith('/api')) {
-    req.url = req.url.replace(/^\/api/, '') || '/';
+    req.url = req.url.replace(/^\/api/, '');
+    if (!req.url || !req.url.startsWith('/')) {
+      req.url = '/' + req.url;
+    }
   }
   next();
 });
