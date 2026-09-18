@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+﻿import { useState, useEffect, useRef, useMemo } from "react";
 import { read as xlsxRead, utils as xlsxUtils, writeFile as xlsxWriteFile } from "xlsx";
 import JsBarcode from "jsbarcode";
 
@@ -46,7 +46,9 @@ const BIZ_STYLE = {
 };
 
 // ── API ───────────────────────────────────────────────────────────
-const API = "/api";
+const API = window.location.hostname === "localhost"
+  ? "https://localhost:3001"
+  : `https://${window.location.hostname}:3001`;
 
 async function apiFetch(path, options = {}) {
   const res = await fetch(`${API}${path}`, {
@@ -58,6 +60,19 @@ async function apiFetch(path, options = {}) {
 }
 
 function generateId() { return "BS" + Date.now().toString().slice(-6) + Math.floor(Math.random() * 90 + 10); }
+
+// Short synthesized beep (no audio asset needed) — confirms a barcode scan landed on a real
+// product without needing to glance at the screen, useful mid-checkout with a hand-scanner.
+function playBeep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = "sine"; osc.frequency.value = 880; gain.gain.value = 0.2;
+    osc.start(); osc.stop(ctx.currentTime + 0.12);
+    osc.onended = () => ctx.close();
+  } catch { }
+}
 
 // ── SKU Generator ─────────────────────────────────────────────────
 const CATEGORY_CODES = {
@@ -2114,7 +2129,7 @@ function POS({ products, setProducts, addSale, customers, setCustomers, exchange
   );
 
   const addToCart = p => { setCart(c => { const ex = c.find(x => x.id === p.id); if (ex) { if (ex.qty >= p.stock) return c; return c.map(x => x.id === p.id ? { ...x, qty: x.qty + 1 } : x); } return [...c, { ...p, qty: 1, business: p.business || "Blingshop" }]; }); };
-  const handleScan = sku => { setScanning(false); const p = products.find(x => x.sku === sku || x.id === sku); if (p && p.stock > 0) addToCart(p); else alert(`Product not found: ${sku}`); };
+  const handleScan = sku => { setScanning(false); const p = products.find(x => x.sku === sku || x.id === sku); if (p && p.stock > 0) { playBeep(); addToCart(p); } else alert(`Product not found: ${sku}`); };
   const updateQty = (id, qty) => { if (qty < 1) { setCart(c => c.filter(x => x.id !== id)); return; } const p = products.find(x => x.id === id); if (qty > p.stock) return; setCart(c => c.map(x => x.id === id ? { ...x, qty } : x)); };
   const subtotal = cart.reduce((s, x) => s + x.price * x.qty, 0);
   const discountAmt = Math.round(subtotal * discount / 100);
