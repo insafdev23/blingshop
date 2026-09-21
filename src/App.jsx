@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { read as xlsxRead, utils as xlsxUtils, writeFile as xlsxWriteFile } from "xlsx";
 import JsBarcode from "jsbarcode";
 
@@ -46,9 +46,15 @@ const BIZ_STYLE = {
 };
 
 // ── API ───────────────────────────────────────────────────────────
-const API = window.location.hostname === "localhost"
-  ? "https://localhost:3001"
-  : `https://${window.location.hostname}:3001`;
+const isLocal =
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1" ||
+  /^192\.168\./.test(window.location.hostname) ||
+  /^10\./.test(window.location.hostname);
+
+const API =
+  import.meta.env.VITE_API_URL ||
+  (isLocal ? `https://${window.location.hostname}:3001` : "/api");
 
 async function apiFetch(path, options = {}) {
   const res = await fetch(`${API}${path}`, {
