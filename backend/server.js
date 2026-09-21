@@ -1,16 +1,16 @@
-const path     = require("path");
+const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, ".env") });
 
-const express  = require("express");
-const cors     = require("cors");
-const mysql    = require("mysql2/promise");
-const https    = require("https");
-const http     = require("http");
-const fs       = require("fs");
-const net      = require("net");
-const bcrypt   = require("bcryptjs");
+const express = require("express");
+const cors = require("cors");
+const mysql = require("mysql2/promise");
+const https = require("https");
+const http = require("http");
+const fs = require("fs");
+const net = require("net");
+const bcrypt = require("bcryptjs");
 
-const app  = express();
+const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Strip leading /api prefix so routes match seamlessly on Vercel
@@ -29,7 +29,7 @@ app.use((req, res, next) => {
 // ── SSL certs ────────────────────────────────────────────────────
 let sslOptions = null;
 const certFile = path.join(__dirname, "localhost+1.pem");
-const keyFile  = path.join(__dirname, "localhost+1-key.pem");
+const keyFile = path.join(__dirname, "localhost+1-key.pem");
 if (fs.existsSync(certFile) && fs.existsSync(keyFile)) {
   sslOptions = { cert: fs.readFileSync(certFile), key: fs.readFileSync(keyFile) };
   console.log("SSL certificates found — running HTTPS");
@@ -39,38 +39,38 @@ if (fs.existsSync(certFile) && fs.existsSync(keyFile)) {
 
 // ── MySQL connection pool ────────────────────────────────────────
 const pool = mysql.createPool({
-  host:               process.env.DB_HOST     || "localhost",
-  port:               Number(process.env.DB_PORT) || 28727,
-  user:               process.env.DB_USER     || "avnadmin",
-  password:           process.env.DB_PASSWORD || "",
-  database:           process.env.DB_NAME     || "defaultdb",
+  host: process.env.DB_HOST || "localhost",
+  port: Number(process.env.DB_PORT) || 28727,
+  user: process.env.DB_USER || "avnadmin",
+  password: process.env.DB_PASSWORD || "",
+  database: process.env.DB_NAME || "defaultdb",
   ssl: {
     rejectUnauthorized: false
   },
   waitForConnections: true,
-  connectionLimit:    5,
-  queueLimit:         0,
-  connectTimeout:     15000,
+  connectionLimit: 5,
+  queueLimit: 0,
+  connectTimeout: 15000,
 });
 
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
-function generateId() { return "ST" + Date.now().toString().slice(-6) + Math.floor(Math.random()*90+10); }
+function generateId() { return "ST" + Date.now().toString().slice(-6) + Math.floor(Math.random() * 90 + 10); }
 
 // ── Auth ─────────────────────────────────────────────────────────
 app.post("/auth/login", async (req, res) => {
   const { username, password } = req.body;
-  if (!username || !password) return res.json({ success:false, error:"Username and password required" });
+  if (!username || !password) return res.json({ success: false, error: "Username and password required" });
   try {
     const [rows] = await pool.query("SELECT * FROM staff WHERE username = ?", [username.trim()]);
-    if (rows.length === 0) return res.json({ success:false, error:"Invalid username or password" });
+    if (rows.length === 0) return res.json({ success: false, error: "Invalid username or password" });
     const staff = rows[0];
-    if (!staff.active) return res.json({ success:false, error:"This account has been deactivated" });
+    if (!staff.active) return res.json({ success: false, error: "This account has been deactivated" });
     const match = bcrypt.compareSync(password, staff.password);
-    if (!match) return res.json({ success:false, error:"Invalid username or password" });
-    res.json({ success:true, staff: { id: staff.id, name: staff.name, username: staff.username, role: staff.role } });
-  } catch (e) { res.status(500).json({ success:false, error: e.message }); }
+    if (!match) return res.json({ success: false, error: "Invalid username or password" });
+    res.json({ success: true, staff: { id: staff.id, name: staff.name, username: staff.username, role: staff.role } });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 // ── Staff Management ─────────────────────────────────────────────
@@ -159,22 +159,22 @@ app.get("/pending-products", async (req, res) => {
 });
 
 app.post("/pending-products", async (req, res) => {
-  const { id, business, category, sku, name, costThb, cost, price, stock, image, staffId, staffName } = req.body;
+  const { id, business, category, sku, name, costThb, cost, price, stock, image, staffId, staffName, costUnknown } = req.body;
   try {
     await pool.query(
-      "INSERT INTO pending_products (id, business, category, sku, name, costThb, cost, price, stock, image, createdAt, staffId, staffName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)",
-      [id, business || "Blingshop", category || "Other", sku, name, costThb || 0, cost || 0, price || 0, stock || 1, image || null, staffId || null, staffName || null]
+      "INSERT INTO pending_products (id, business, category, sku, name, costThb, cost, price, stock, image, costUnknown, createdAt, staffId, staffName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)",
+      [id, business || "Blingshop", category || "Other", sku, name, costThb || 0, cost || 0, price || 0, stock || 1, image || null, costUnknown ? 1 : 0, staffId || null, staffName || null]
     );
     res.json({ success: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.put("/pending-products/:id", async (req, res) => {
-  const { business, category, sku, name, costThb, cost, price, stock, image } = req.body;
+  const { business, category, sku, name, costThb, cost, price, stock, image, costUnknown } = req.body;
   try {
     await pool.query(
-      "UPDATE pending_products SET business=?, category=?, sku=?, name=?, costThb=?, cost=?, price=?, stock=?, image=? WHERE id=?",
-      [business || "Blingshop", category || "Other", sku, name, costThb || 0, cost || 0, price || 0, stock || 1, image || null, req.params.id]
+      "UPDATE pending_products SET business=?, category=?, sku=?, name=?, costThb=?, cost=?, price=?, stock=?, image=?, costUnknown=? WHERE id=?",
+      [business || "Blingshop", category || "Other", sku, name, costThb || 0, cost || 0, price || 0, stock || 1, image || null, costUnknown ? 1 : 0, req.params.id]
     );
     res.json({ success: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -363,6 +363,7 @@ async function initDB() {
         price DECIMAL(10,2) NOT NULL DEFAULT 0,
         stock INT NOT NULL DEFAULT 1,
         image LONGTEXT,
+        costUnknown TINYINT(1) NOT NULL DEFAULT 0,
         createdAt DATETIME NOT NULL,
         staffId VARCHAR(32),
         staffName VARCHAR(100)
@@ -400,6 +401,16 @@ async function initDB() {
       await conn.query("ALTER TABLE sales ADD COLUMN deliveryFee DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER deliveryMethod");
       await conn.query("ALTER TABLE sales ADD COLUMN deliveryPaidTo VARCHAR(10) DEFAULT NULL AFTER deliveryFee");
       console.log("Added delivery-tracking columns to sales table.");
+    }
+
+    // Add costUnknown flag to pending_products if it doesn't exist yet — lets Bulk Add mark old
+    // stock with no recoverable cost as genuinely "unknown" rather than a misleading real 0.
+    const [cuCol] = await conn.query(
+      "SELECT COUNT(*) as c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'pending_products' AND column_name = 'costUnknown'"
+    );
+    if (cuCol[0].c === 0) {
+      await conn.query("ALTER TABLE pending_products ADD COLUMN costUnknown TINYINT(1) NOT NULL DEFAULT 0 AFTER image");
+      console.log("Added costUnknown column to pending_products table.");
     }
 
     // Seed a default Owner account if no staff exist yet

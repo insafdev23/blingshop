@@ -944,6 +944,10 @@ function BulkAddModal({ existingProducts, pendingProducts, onSave, onClose, blin
   const [image, setImage] = useState("");
   const [costThb, setCostThb] = useState("");
   const [qty, setQty] = useState("1");
+  // Not reset between saves either — same reasoning as category: a batch of old stock with no
+  // recoverable cost stays in that mode until the user explicitly turns it off.
+  const [unknownCost, setUnknownCost] = useState(false);
+  const [manualPrice, setManualPrice] = useState("");
   const isRC = business === "RC Boutique";
   const storedRate = isRC ? rcThbRate : blingshopThbRate;
   const [rateInput, setRateInput] = useState(storedRate || "");
@@ -958,8 +962,10 @@ function BulkAddModal({ existingProducts, pendingProducts, onSave, onClose, blin
 
   const handleBusiness = b => { setBusiness(b); if (!categoriesForBiz(b).includes(category)) setCategory("Other"); };
 
-  const price = quickAddPrice(business, costThb, rateInput);
-  const canSave = image && costThb !== "" && +costThb > 0 && qty !== "" && +qty > 0 && +rateInput > 0;
+  const price = unknownCost ? (+manualPrice || 0) : quickAddPrice(business, costThb, rateInput);
+  const canSave = image && qty !== "" && +qty > 0 && (
+    unknownCost ? manualPrice !== "" && +manualPrice > 0 : costThb !== "" && +costThb > 0 && +rateInput > 0
+  );
 
   const handleImage = e => {
     const f = e.target.files[0]; if (!f) return;
@@ -978,12 +984,13 @@ function BulkAddModal({ existingProducts, pendingProducts, onSave, onClose, blin
     if (!canSave || saving) return;
     setSaving(true);
     try {
-      if (+rateInput !== +storedRate) (isRC ? setRcThbRate : setBlingshopThbRate)(rateInput);
+      if (!unknownCost && +rateInput !== +storedRate) (isRC ? setRcThbRate : setBlingshopThbRate)(rateInput);
       const allKnown = [...existingProducts, ...pendingProducts];
       const sku = generateSKU(category, business, allKnown);
       const item = {
         id: generateId(), business, category, sku, name: `${sku} ${category}`,
-        costThb: +costThb, cost: quickAddCostLkr(costThb, rateInput), price, stock: +qty, image,
+        costThb: unknownCost ? 0 : +costThb, cost: unknownCost ? 0 : quickAddCostLkr(costThb, rateInput),
+        costUnknown: unknownCost, price, stock: +qty, image,
       };
       await onSave(item);
       setSavedCount(c => c + 1);
@@ -1019,11 +1026,18 @@ function BulkAddModal({ existingProducts, pendingProducts, onSave, onClose, blin
           <div style={{ fontSize: 11, color: GRAY, marginTop: 4 }}>Stays selected across saves — set it once per batch (e.g. all necklaces), then add items without re-picking it.</div>
         </div>
 
-        <div>
-          <label style={labelStyle}>Exchange Rate (LKR per THB)</label>
-          <input value={rateInput} onChange={e => setRateInput(e.target.value)} placeholder="e.g. 9.5" type="number" style={inp} />
-          <div style={{ fontSize: 11, color: GRAY, marginTop: 4 }}>THB rate fluctuates — enter it once per restock. It's remembered per business until you change it here again.</div>
-        </div>
+        {!unknownCost && (
+          <div>
+            <label style={labelStyle}>Exchange Rate (LKR per THB)</label>
+            <input value={rateInput} onChange={e => setRateInput(e.target.value)} placeholder="e.g. 9.5" type="number" style={inp} />
+            <div style={{ fontSize: 11, color: GRAY, marginTop: 4 }}>THB rate fluctuates — enter it once per restock. It's remembered per business until you change it here again.</div>
+          </div>
+        )}
+
+        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#374151", background: LIGHT, border: `1px solid ${BORDER}`, borderRadius: 8, padding: "10px 12px" }}>
+          <input type="checkbox" checked={unknownCost} onChange={e => setUnknownCost(e.target.checked)} style={{ width: 15, height: 15, accentColor: GOLD_DARK, cursor: "pointer", flexShrink: 0 }} />
+          I don't know the cost for this item (old stock) — let me enter the selling price directly
+        </label>
 
         <div>
           <label style={labelStyle}>Product Photo</label>
@@ -1048,8 +1062,8 @@ function BulkAddModal({ existingProducts, pendingProducts, onSave, onClose, blin
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div>
-            <label style={labelStyle}>Cost (THB)</label>
-            <input value={costThb} onChange={e => setCostThb(e.target.value)} placeholder="0" type="number" style={inp} />
+            <label style={labelStyle}>{unknownCost ? "Selling Price (LKR)" : "Cost (THB)"}</label>
+            <input value={unknownCost ? manualPrice : costThb} onChange={e => (unknownCost ? setManualPrice : setCostThb)(e.target.value)} placeholder="0" type="number" style={inp} />
           </div>
           <div>
             <label style={labelStyle}>Quantity</label>
@@ -1057,13 +1071,23 @@ function BulkAddModal({ existingProducts, pendingProducts, onSave, onClose, blin
           </div>
         </div>
 
-        {costThb !== "" && +costThb > 0 && +rateInput > 0 && (
+        {!unknownCost && costThb !== "" && +costThb > 0 && +rateInput > 0 && (
           <div style={{ background: GOLD_LIGHT, border: `1px solid ${GOLD}`, borderRadius: 8, padding: "10px 12px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontSize: 12, color: GOLD_DARK, fontWeight: 600 }}>{isRC ? "Starting Price (break-even)" : "Selling Price (auto)"}</span>
               <span style={{ fontSize: 16, fontWeight: 800, color: GOLD_DARK }}>LKR {price.toLocaleString()}</span>
             </div>
             {isRC && <div style={{ fontSize: 11, color: GOLD_DARK, marginTop: 4 }}>No profit margin yet — cost + packing (LKR {RC_PACKING_LKR}) + cargo (LKR {RC_CARGO_LKR}). Set the profit by adjusting price in Review Pending.</div>}
+          </div>
+        )}
+
+        {unknownCost && manualPrice !== "" && +manualPrice > 0 && (
+          <div style={{ background: GOLD_LIGHT, border: `1px solid ${GOLD}`, borderRadius: 8, padding: "10px 12px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 12, color: GOLD_DARK, fontWeight: 600 }}>Selling Price (manual)</span>
+              <span style={{ fontSize: 16, fontWeight: 800, color: GOLD_DARK }}>LKR {(+manualPrice).toLocaleString()}</span>
+            </div>
+            <div style={{ fontSize: 11, color: GOLD_DARK, marginTop: 4 }}>Cost marked unknown — won't count toward Stock Worth in Reports until a real cost is filled in later.</div>
           </div>
         )}
 
@@ -1160,7 +1184,9 @@ function ReviewPendingModal({ pendingProducts, setPendingProducts, setProducts, 
                     <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <BizBadge business={item.business} />
                       <span style={{ fontSize: 11, color: GRAY }}>SKU: {item.sku}</span>
-                      <span style={{ fontSize: 11, color: GRAY }}>Cost: THB {(+item.costThb).toLocaleString()} (LKR {(+item.cost).toLocaleString()})</span>
+                      {item.costUnknown
+                        ? <span style={{ fontSize: 11, fontWeight: 700, color: "#B45309", background: "#FEF3C7", padding: "1px 7px", borderRadius: 10 }}>Cost unknown — old stock</span>
+                        : <span style={{ fontSize: 11, color: GRAY }}>Cost: THB {(+item.costThb).toLocaleString()} (LKR {(+item.cost).toLocaleString()})</span>}
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <label style={{ fontSize: 10, color: GRAY }}>Name</label>
