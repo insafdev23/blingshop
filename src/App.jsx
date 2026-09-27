@@ -1046,10 +1046,21 @@ function BulkAddModal({ existingProducts, pendingProducts, onSave, onClose, blin
 
         <div>
           <label style={labelStyle}>Category</label>
-          <select value={category} onChange={e => setCategory(e.target.value)} style={{ ...inp, marginTop: 6 }}>
-            {categoriesForBiz(business).slice(1).map(c => <option key={c}>{c}</option>)}
-          </select>
-          <div style={{ fontSize: 11, color: GRAY, marginTop: 4 }}>Stays selected across saves — set it once per batch (e.g. all necklaces), then add items without re-picking it.</div>
+          {!addingCategory ? (
+            <select value={category} onChange={e => handleCategorySelect(e.target.value)} style={{ ...inp, marginTop: 6 }}>
+              {categoriesForBiz(business, customCategories).slice(1).map(c => <option key={c}>{c}</option>)}
+              <option value="__add__">+ Add new category…</option>
+            </select>
+          ) : (
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              <input autoFocus value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} placeholder="New category name" style={{ ...inp, marginTop: 0, flex: 1 }} onKeyDown={e => e.key === "Enter" && saveNewCategory()} />
+              <button type="button" onClick={saveNewCategory} style={{ padding: "9px 16px", background: GOLD_DARK, color: WHITE, border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>Add</button>
+              <button type="button" onClick={() => setAddingCategory(false)} style={{ padding: "9px 14px", background: WHITE, color: GRAY, border: `1px solid ${BORDER}`, borderRadius: 8, cursor: "pointer", fontSize: 13 }}>Cancel</button>
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: GRAY, marginTop: 4 }}>
+            {addingCategory ? `Added for ${business} — it'll show up in the category filters right after.` : "Stays selected across saves — set it once per batch (e.g. all necklaces), then add items without re-picking it."}
+          </div>
         </div>
 
         {!unknownCost && (
