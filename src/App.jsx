@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+﻿import { useState, useEffect, useRef, useMemo } from "react";
 import { read as xlsxRead, utils as xlsxUtils, writeFile as xlsxWriteFile } from "xlsx";
 import JsBarcode from "jsbarcode";
 
@@ -25,10 +25,18 @@ const CATEGORIES = ["All", "Clothing", "Jewelry", "Necklace", "Bracelet", "Ankle
 // categoriesForBiz). "All" still shows the full master list above, unscoped.
 const BLINGSHOP_CATEGORIES = ["Necklace", "Bracelet", "Anklet", "Chain", "Earring", "Scarf", "Ring", "Other"];
 const RC_CATEGORIES = ["Tops", "Dress", "Skirt", "Pant", "Bags", "Shawls", "Other", "Belts", "Shirt", "Blouse"];
-const categoriesForBiz = biz => {
-  if (biz === "Blingshop") return ["All", ...BLINGSHOP_CATEGORIES];
-  if (biz === "RC Boutique") return ["All", ...RC_CATEGORIES];
-  return CATEGORIES;
+// `custom` is the user-added-categories map ({ Blingshop: [...], "RC Boutique": [...] }, persisted
+// via the settings table under key "custom_categories"). Appended after the built-in list for
+// that business so custom ones always sort last; falling through to no business (e.g. ProductForm's
+// unscoped dropdown) merges both businesses' custom categories into the master list, deduped.
+const categoriesForBiz = (biz, custom) => {
+  const c = custom || {};
+  const blingshopCustom = c.Blingshop || [];
+  const rcCustom = c["RC Boutique"] || [];
+  if (biz === "Blingshop") return ["All", ...BLINGSHOP_CATEGORIES, ...blingshopCustom];
+  if (biz === "RC Boutique") return ["All", ...RC_CATEGORIES, ...rcCustom];
+  const extra = [...blingshopCustom, ...rcCustom].filter(name => !CATEGORIES.includes(name));
+  return [...CATEGORIES, ...extra];
 };
 const DELIVERY_METHODS = ["In Store", "Courier", "Flash Delivery"];
 // Who the customer actually hands the delivery fee to: "Shop" means we collect it at checkout
@@ -625,7 +633,7 @@ function mapExcelRow(rawRow) {
   return result;
 }
 
-function validateExcelRow(row, idx) {
+function validateExcelRow(row, idx, customCategories) {
   const errors = [];
   if (!row.name) errors.push("Missing name");
   const priceNum = parseFloat(row.price);
@@ -634,7 +642,7 @@ function validateExcelRow(row, idx) {
   if (row.cost !== "" && (isNaN(costNum) || costNum < 0)) errors.push("Invalid cost");
   const stockNum = parseInt(row.stock);
   if (row.stock === "" || isNaN(stockNum) || stockNum < 0) errors.push("Invalid stock");
-  let category = CATEGORIES.slice(1).find(c => c.toLowerCase() === row.category.toLowerCase());
+  let category = categoriesForBiz(undefined, customCategories).slice(1).find(c => c.toLowerCase() === row.category.toLowerCase());
   if (!category) category = "Other";
   let business = BUSINESSES.find(b => b.toLowerCase() === row.business.toLowerCase());
   if (!business) business = "Blingshop";
@@ -775,7 +783,7 @@ const inp = { display: "block", width: "100%", padding: "9px 12px", border: `1px
 const labelStyle = { fontSize: 12, color: GOLD_DARK, fontWeight: 600, display: "block", marginBottom: 2 };
 
 // ── Product Form ──────────────────────────────────────────────────
-function ProductForm({ initial, onSave, onCancel, existingProducts }) {
+function ProductForm({ initial, onSave, onCancel, existingProducts, customCategories }) {
   const isEdit = !!initial;
   const [form, setForm] = useState(() => initial || { name: "", category: "Clothing", business: "Blingshop", price: "", cost: "", stock: "", image: "", sku: generateSKU("Clothing", "Blingshop", []) });
   const [skuEdited, setSkuEdited] = useState(isEdit);
@@ -796,7 +804,7 @@ function ProductForm({ initial, onSave, onCancel, existingProducts }) {
       <div><label style={labelStyle}>Product Name</label><input value={form.name} onChange={e => set("name", e.target.value)} placeholder="Product Name" style={inp} /></div>
       <div><label style={labelStyle}>Category</label>
         <select value={form.category} onChange={e => handleCatOrBiz(e.target.value, form.business)} style={{ ...inp, marginTop: 4 }}>
-          {CATEGORIES.slice(1).map(c => <option key={c}>{c}</option>)}
+          {categoriesForBiz(undefined, customCategories).slice(1).map(c => <option key={c}>{c}</option>)}
         </select>
       </div>
       <div>
@@ -837,7 +845,7 @@ function ProductForm({ initial, onSave, onCancel, existingProducts }) {
 }
 
 // ── Excel Import Modal ────────────────────────────────────────────
-function ImportModal({ existingProducts, onImport, onClose }) {
+function ImportModal({ existingProducts, onImport, onClose, customCategories }) {
   const [rows, setRows] = useState([]); const [fileName, setFileName] = useState(""); const [importing, setImporting] = useState(false); const [status, setStatus] = useState(""); const fileRef = useRef();
   const downloadTemplate = () => {
     const sample = [
@@ -871,7 +879,7 @@ function ImportModal({ existingProducts, onImport, onClose }) {
       const ws = wb.Sheets[wb.SheetNames[0]];
       const raw = xlsxUtils.sheet_to_json(ws, { defval: "" });
       if (raw.length === 0) { setStatus("error:No data rows found in this file."); return; }
-      setRows(raw.map(mapExcelRow).map((r, i) => validateExcelRow(r, i)));
+      setRows(raw.map(mapExcelRow).map((r, i) => validateExcelRow(r, i, customCategories)));
     } catch (err) { setStatus(`error:Could not read file. ${err.message}`); }
   };
   const validRows = rows.filter(r => r.valid);
@@ -941,7 +949,7 @@ function ImportModal({ existingProducts, onImport, onClose }) {
 // ── Bulk Add (Quick Source) Modal ────────────────────────────────────
 // Fast-capture flow for sourcing trips: photo + cost only. Name/SKU/price are generated
 // automatically and land in a pending queue for later review before entering real inventory.
-function BulkAddModal({ existingProducts, pendingProducts, onSave, onClose, blingshopThbRate, setBlingshopThbRate, rcThbRate, setRcThbRate }) {
+function BulkAddModal({ existingProducts, pendingProducts, onSave, onClose, blingshopThbRate, setBlingshopThbRate, rcThbRate, setRcThbRate, customCategories, addCustomCategory }) {
   const [business, setBusiness] = useState("Blingshop");
   // Deliberately not reset between saves (see reset() below) — sourcing trips add many of the
   // same category back-to-back (e.g. a dozen necklaces), so re-picking it each time would be
@@ -966,7 +974,19 @@ function BulkAddModal({ existingProducts, pendingProducts, onSave, onClose, blin
   // business's last-saved rate, not whatever was typed for the other one.
   useEffect(() => { setRateInput(storedRate || ""); }, [business]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleBusiness = b => { setBusiness(b); if (!categoriesForBiz(b).includes(category)) setCategory("Other"); };
+  const handleBusiness = b => { setBusiness(b); if (!categoriesForBiz(b, customCategories).includes(category)) setCategory("Other"); };
+
+  const handleCategorySelect = val => {
+    if (val === "__add__") { setAddingCategory(true); setNewCategoryName(""); }
+    else setCategory(val);
+  };
+  const saveNewCategory = () => {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    addCustomCategory(business, name);
+    setCategory(name);
+    setAddingCategory(false); setNewCategoryName("");
+  };
 
   const price = unknownCost ? (+manualPrice || 0) : quickAddPrice(business, costThb, rateInput);
   const canSave = image && qty !== "" && +qty > 0 && (
@@ -1111,7 +1131,7 @@ function BulkAddModal({ existingProducts, pendingProducts, onSave, onClose, blin
 // ── Review Pending Modal ─────────────────────────────────────────────
 // Owner-only queue where Quick Source captures get their name/price/category/stock finalized
 // before being bulk-imported into the real product catalog.
-function ReviewPendingModal({ pendingProducts, setPendingProducts, setProducts, onClose }) {
+function ReviewPendingModal({ pendingProducts, setPendingProducts, setProducts, onClose, customCategories }) {
   const [edits, setEdits] = useState({});
   const [selected, setSelected] = useState({});
   const [busy, setBusy] = useState(false);
@@ -1201,7 +1221,7 @@ function ReviewPendingModal({ pendingProducts, setPendingProducts, setProducts, 
                     <div style={{ minWidth: 0 }}>
                       <label style={{ fontSize: 10, color: GRAY }}>Category</label>
                       <select value={getVal(item, "category")} onChange={e => handleCategoryChange(item, e.target.value)} style={{ ...inp, marginTop: 2, fontSize: 12, padding: "6px 8px" }}>
-                        {CATEGORIES.slice(1).map(c => <option key={c}>{c}</option>)}
+                        {categoriesForBiz(undefined, customCategories).slice(1).map(c => <option key={c}>{c}</option>)}
                       </select>
                     </div>
                     <div style={{ minWidth: 0 }}>
@@ -1932,10 +1952,10 @@ function Dashboard({ products, sales, currentStaff }) {
 }
 
 // ── Inventory ─────────────────────────────────────────────────────
-function Inventory({ products, setProducts, zebraIP, currentStaff, blingshopThbRate, setBlingshopThbRate, rcThbRate, setRcThbRate }) {
+function Inventory({ products, setProducts, zebraIP, currentStaff, blingshopThbRate, setBlingshopThbRate, rcThbRate, setRcThbRate, customCategories, addCustomCategory }) {
   const [modal, setModal] = useState(null); const [editProd, setEditProd] = useState(null); const [barcodeProduct, setBarcodeProduct] = useState(null);
   const [catFilter, setCatFilter] = useState("All"); const [bizFilter, setBizFilter] = useState("All"); const [search, setSearch] = useState(""); const [showImport, setShowImport] = useState(false);
-  const handleBizFilter = b => { setBizFilter(b); if (!categoriesForBiz(b).includes(catFilter)) setCatFilter("All"); };
+  const handleBizFilter = b => { setBizFilter(b); if (!categoriesForBiz(b, customCategories).includes(catFilter)) setCatFilter("All"); };
   const [showBulkAdd, setShowBulkAdd] = useState(false); const [showReviewPending, setShowReviewPending] = useState(false);
   const [pendingProducts, setPendingProducts] = useState([]);
   const [selectedIds, setSelectedIds] = useState({}); const [showBulkPrint, setShowBulkPrint] = useState(false);
@@ -2020,7 +2040,7 @@ function Inventory({ products, setProducts, zebraIP, currentStaff, blingshopThbR
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or SKU..." style={{ ...inp, paddingLeft: 38, marginTop: 0 }} />
       </div>
       <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-        {categoriesForBiz(bizFilter).map(c => (<button key={c} onClick={() => setCatFilter(c)} style={{ padding: "5px 14px", borderRadius: 20, border: `1px solid ${catFilter === c ? GOLD : BORDER}`, background: catFilter === c ? GOLD_DARK : WHITE, color: catFilter === c ? WHITE : GRAY, cursor: "pointer", fontSize: 12, fontWeight: catFilter === c ? 700 : 400 }}>{c}</button>))}
+        {categoriesForBiz(bizFilter, customCategories).map(c => (<button key={c} onClick={() => setCatFilter(c)} style={{ padding: "5px 14px", borderRadius: 20, border: `1px solid ${catFilter === c ? GOLD : BORDER}`, background: catFilter === c ? GOLD_DARK : WHITE, color: catFilter === c ? WHITE : GRAY, cursor: "pointer", fontSize: 12, fontWeight: catFilter === c ? 700 : 400 }}>{c}</button>))}
       </div>
       {filtered.length > 0 && (
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#374151", cursor: "pointer", marginBottom: 8 }}>
@@ -2057,11 +2077,11 @@ function Inventory({ products, setProducts, zebraIP, currentStaff, blingshopThbR
         ))}
         {filtered.length === 0 && <div style={{ textAlign: "center", color: "#9CA3AF", padding: "40px 0", fontSize: 14 }}>No products found</div>}
       </div>
-      {modal === "add" && <Modal title={editProd ? "Edit Product" : "Add New Product"} onClose={() => { setModal(null); setEditProd(null); }}><ProductForm initial={editProd} onSave={handleSave} onCancel={() => { setModal(null); setEditProd(null); }} existingProducts={products} /></Modal>}
+      {modal === "add" && <Modal title={editProd ? "Edit Product" : "Add New Product"} onClose={() => { setModal(null); setEditProd(null); }}><ProductForm initial={editProd} onSave={handleSave} onCancel={() => { setModal(null); setEditProd(null); }} existingProducts={products} customCategories={customCategories} /></Modal>}
       {barcodeProduct && <LabelPrintModal product={barcodeProduct} zebraIP={zebraIP} onClose={() => setBarcodeProduct(null)} />}
-      {showImport && <ImportModal existingProducts={products} onImport={handleImportConfirm} onClose={() => setShowImport(false)} />}
-      {showBulkAdd && <BulkAddModal existingProducts={products} pendingProducts={pendingProducts} onSave={handleBulkAddSave} onClose={() => setShowBulkAdd(false)} blingshopThbRate={blingshopThbRate} setBlingshopThbRate={setBlingshopThbRate} rcThbRate={rcThbRate} setRcThbRate={setRcThbRate} />}
-      {showReviewPending && <ReviewPendingModal pendingProducts={pendingProducts} setPendingProducts={setPendingProducts} setProducts={setProducts} onClose={() => setShowReviewPending(false)} />}
+      {showImport && <ImportModal existingProducts={products} onImport={handleImportConfirm} onClose={() => setShowImport(false)} customCategories={customCategories} />}
+      {showBulkAdd && <BulkAddModal existingProducts={products} pendingProducts={pendingProducts} onSave={handleBulkAddSave} onClose={() => setShowBulkAdd(false)} blingshopThbRate={blingshopThbRate} setBlingshopThbRate={setBlingshopThbRate} rcThbRate={rcThbRate} setRcThbRate={setRcThbRate} customCategories={customCategories} addCustomCategory={addCustomCategory} />}
+      {showReviewPending && <ReviewPendingModal pendingProducts={pendingProducts} setPendingProducts={setPendingProducts} setProducts={setProducts} onClose={() => setShowReviewPending(false)} customCategories={customCategories} />}
       {showBulkPrint && <BulkLabelPrintModal products={selectedProducts} zebraIP={zebraIP} onClose={() => setShowBulkPrint(false)} />}
     </div>
   );
@@ -2117,12 +2137,12 @@ function CustomerForm({ initial, onSave, onCancel }) {
 }
 
 // ── POS ───────────────────────────────────────────────────────────
-function POS({ products, setProducts, addSale, customers, setCustomers, exchangeCredit, clearExchangeCredit, currentStaff }) {
+function POS({ products, setProducts, addSale, customers, setCustomers, exchangeCredit, clearExchangeCredit, currentStaff, customCategories }) {
   const [cart, setCart] = useState([]);
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("All");
   const [bizFilter, setBizFilter] = useState("All");
-  const handleBizFilter = b => { setBizFilter(b); if (!categoriesForBiz(b).includes(catFilter)) setCatFilter("All"); };
+  const handleBizFilter = b => { setBizFilter(b); if (!categoriesForBiz(b, customCategories).includes(catFilter)) setCatFilter("All"); };
   const [discount, setDiscount] = useState(0);
   const [deliveryMethod, setDeliveryMethod] = useState("In Store");
   const [deliveryFee, setDeliveryFee] = useState("");
@@ -2379,7 +2399,7 @@ function POS({ products, setProducts, addSale, customers, setCustomers, exchange
           </div>
           <BizFilter value={bizFilter} onChange={handleBizFilter} />
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "10px 0" }}>
-            {categoriesForBiz(bizFilter).map(c => (<button key={c} onClick={() => setCatFilter(c)} style={{ padding: "5px 14px", borderRadius: 20, border: `1px solid ${catFilter === c ? GOLD : BORDER}`, background: catFilter === c ? GOLD_DARK : WHITE, color: catFilter === c ? WHITE : GRAY, cursor: "pointer", fontSize: 12, fontWeight: catFilter === c ? 700 : 400 }}>{c}</button>))}
+            {categoriesForBiz(bizFilter, customCategories).map(c => (<button key={c} onClick={() => setCatFilter(c)} style={{ padding: "5px 14px", borderRadius: 20, border: `1px solid ${catFilter === c ? GOLD : BORDER}`, background: catFilter === c ? GOLD_DARK : WHITE, color: catFilter === c ? WHITE : GRAY, cursor: "pointer", fontSize: 12, fontWeight: catFilter === c ? 700 : 400 }}>{c}</button>))}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: isWide ? "1fr 1fr 1fr" : "1fr 1fr", gap: 10 }}>
             {filtered.map(p => (
@@ -3500,6 +3520,7 @@ export default function App() {
   const [zebraIP, setZebraIPState] = useState("");
   const [blingshopThbRate, setBlingshopThbRateState] = useState("");
   const [rcThbRate, setRcThbRateState] = useState("");
+  const [customCategories, setCustomCategoriesState] = useState({});
   const [exchangeCredit, setExchangeCredit] = useState(null);
   const [booting, setBooting] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -3576,6 +3597,20 @@ export default function App() {
     try { await apiFetch("/settings/rc_thb_rate", { method: "PUT", body: { value: rate } }); } catch { }
   };
 
+  // Custom categories added from Bulk Add — persisted as JSON in the generic settings table
+  // (no schema change needed), scoped per business so a Blingshop-added category doesn't clutter
+  // RC Boutique's filter and vice versa. Returns false without writing if the name already exists
+  // (built-in or custom, case-insensitive) so callers can select the existing one instead of duping it.
+  const addCustomCategory = (business, name) => {
+    const trimmed = name.trim();
+    if (!trimmed) return false;
+    if (categoriesForBiz(business, customCategories).some(c => c.toLowerCase() === trimmed.toLowerCase())) return false;
+    const next = { ...customCategories, [business]: [...(customCategories[business] || []), trimmed] };
+    setCustomCategoriesState(next);
+    apiFetch("/settings/custom_categories", { method: "PUT", body: { value: JSON.stringify(next) } }).catch(() => { });
+    return true;
+  };
+
   const visibleTabs = currentStaff?.role === "Owner" ? TABS : SALESPERSON_TABS;
 
   if (booting) {
@@ -3623,8 +3658,8 @@ export default function App() {
       </div>
       <div style={{ padding: 16, maxWidth: tab === "POS" ? 1400 : 640, margin: "0 auto" }}>
         {tab === "Dashboard" && <Dashboard products={products} sales={sales} currentStaff={currentStaff} />}
-        {tab === "Inventory" && <Inventory products={products} setProducts={setProductsState} zebraIP={zebraIP} currentStaff={currentStaff} blingshopThbRate={blingshopThbRate} setBlingshopThbRate={setBlingshopThbRate} rcThbRate={rcThbRate} setRcThbRate={setRcThbRate} />}
-        {tab === "POS" && <POS products={products} setProducts={setProductsState} addSale={addSale} customers={customers} setCustomers={setCustomersState} exchangeCredit={exchangeCredit} clearExchangeCredit={() => setExchangeCredit(null)} currentStaff={currentStaff} />}
+        {tab === "Inventory" && <Inventory products={products} setProducts={setProductsState} zebraIP={zebraIP} currentStaff={currentStaff} blingshopThbRate={blingshopThbRate} setBlingshopThbRate={setBlingshopThbRate} rcThbRate={rcThbRate} setRcThbRate={setRcThbRate} customCategories={customCategories} addCustomCategory={addCustomCategory} />}
+        {tab === "POS" && <POS products={products} setProducts={setProductsState} addSale={addSale} customers={customers} setCustomers={setCustomersState} exchangeCredit={exchangeCredit} clearExchangeCredit={() => setExchangeCredit(null)} currentStaff={currentStaff} customCategories={customCategories} />}
         {tab === "Sales History" && <SalesHistory sales={sales} refunds={refunds} addRefund={addRefund} setProducts={setProductsState} currentStaff={currentStaff} onExchange={credit => { setExchangeCredit(credit); setTab("POS"); }} />}
         {tab === "Reports" && currentStaff.role === "Owner" && <Reports products={products} sales={sales} />}
         {tab === "Customers" && <Customers customers={customers} setCustomers={setCustomersState} sales={sales} />}
