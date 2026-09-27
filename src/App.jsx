@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { read as xlsxRead, utils as xlsxUtils, writeFile as xlsxWriteFile } from "xlsx";
 import JsBarcode from "jsbarcode";
 
@@ -955,6 +955,8 @@ function BulkAddModal({ existingProducts, pendingProducts, onSave, onClose, blin
   // same category back-to-back (e.g. a dozen necklaces), so re-picking it each time would be
   // exactly the back-and-forth this screen exists to avoid.
   const [category, setCategory] = useState("Other");
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
   const [image, setImage] = useState("");
   const [costThb, setCostThb] = useState("");
   const [qty, setQty] = useState("1");
