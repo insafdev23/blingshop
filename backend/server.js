@@ -208,13 +208,19 @@ app.post("/sales", async (req, res) => {
     );
     for (const item of items) {
       await conn.query(
-        "INSERT INTO sale_items (sale_id, product_id, name, price, qty, business) VALUES (?, ?, ?, ?, ?, ?)",
-        [id, item.id, item.name, item.price, item.qty, item.business || "Blingshop"]
+        "INSERT INTO sale_items (sale_id, product_id, name, price, paidPrice, qty, business) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [id, item.id, item.name, item.price, item.paidPrice ?? item.price, item.qty, item.business || "Blingshop"]
       );
-      await conn.query(
-        "UPDATE products SET stock = stock - ? WHERE id = ?",
-        [item.qty, item.id]
+      // Guard against overselling under concurrent checkouts (two devices selling the last unit
+      // of the same product at the same time) — only decrement if enough stock is actually
+      // available right now, rather than trusting the frontend's possibly-stale stock count.
+      const [result] = await conn.query(
+        "UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?",
+        [item.qty, item.id, item.qty]
       );
+      if (result.affectedRows === 0) {
+        throw new Error(`Not enough stock left for "${item.name || item.id}" — it may have just been sold elsewhere. Refresh and try again.`);
+      }
     }
     await conn.commit();
     res.json({ success: true });
@@ -244,11 +250,21 @@ app.post("/refunds", async (req, res) => {
       "INSERT INTO refunds (id, sale_id, date, items, refund_amount, type, notes, staffId, staffName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [id, sale_id, mysqlDate, JSON.stringify(items), refund_amount, type || "refund", notes || null, staffId || null, staffName || null]
     );
+    // A deleted product means nothing to restock to — that shouldn't block the refund itself
+    // (the money/credit side is still valid), but it was previously failing silently with no
+    // indication the stock was never actually restored anywhere. Flag it in the response instead.
+    const skippedRestocks = [];
     for (const item of items) {
-      await conn.query("UPDATE products SET stock = stock + ? WHERE id = ?", [item.qty, item.product_id]);
+      const [result] = await conn.query("UPDATE products SET stock = stock + ? WHERE id = ?", [item.qty, item.product_id]);
+      if (result.affectedRows === 0) skippedRestocks.push(item.name || item.product_id);
     }
     await conn.commit();
-    res.json({ success: true });
+    res.json({
+      success: true,
+      warning: skippedRestocks.length
+        ? `Stock could not be restored for: ${skippedRestocks.join(", ")} — the product no longer exists in Inventory.`
+        : undefined,
+    });
   } catch (e) {
     await conn.rollback();
     res.status(400).json({ error: e.message });
@@ -411,6 +427,17 @@ async function initDB() {
     if (cuCol[0].c === 0) {
       await conn.query("ALTER TABLE pending_products ADD COLUMN costUnknown TINYINT(1) NOT NULL DEFAULT 0 AFTER image");
       console.log("Added costUnknown column to pending_products table.");
+    }
+
+    // Add paidPrice to sale_items if it doesn't exist yet — the per-unit amount actually
+    // collected after item-level + overall bill discounts, so a later refund can credit back
+    // what was really paid instead of the full undiscounted catalog price (see RefundModal).
+    const [ppCol] = await conn.query(
+      "SELECT COUNT(*) as c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'sale_items' AND column_name = 'paidPrice'"
+    );
+    if (ppCol[0].c === 0) {
+      await conn.query("ALTER TABLE sale_items ADD COLUMN paidPrice DECIMAL(10,2) DEFAULT NULL AFTER price");
+      console.log("Added paidPrice column to sale_items table.");
     }
 
     // Seed a default Owner account if no staff exist yet
