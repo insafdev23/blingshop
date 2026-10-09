@@ -82,7 +82,7 @@ app.post("/auth/login", async (req, res) => {
 // ── Staff Management ─────────────────────────────────────────────
 app.get("/staff", async (req, res) => {
   try {
-    const [rows] = await pool.query("SELECT id, name, username, role, active, createdAt FROM staff ORDER BY name");
+    const [rows] = await pool.query("SELECT id, name, username, role, active FROM staff ORDER BY name");
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -403,6 +403,75 @@ async function initDB() {
   const conn = await pool.getConnection();
   try {
     await conn.query(`
+      CREATE TABLE IF NOT EXISTS staff (
+        id VARCHAR(32) PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        username VARCHAR(50) NOT NULL UNIQUE,
+        password VARCHAR(255) NOT NULL,
+        role VARCHAR(20) NOT NULL DEFAULT 'Cashier',
+        active TINYINT(1) NOT NULL DEFAULT 1
+      )
+    `);
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS products (
+        id VARCHAR(32) PRIMARY KEY,
+        name VARCHAR(200) NOT NULL,
+        category VARCHAR(50) NOT NULL DEFAULT 'Other',
+        business VARCHAR(30) NOT NULL DEFAULT 'Blingshop',
+        price DECIMAL(10,2) NOT NULL DEFAULT 0,
+        cost DECIMAL(10,2) NOT NULL DEFAULT 0,
+        stock INT NOT NULL DEFAULT 0,
+        sku VARCHAR(50),
+        image TEXT,
+        created_at DATETIME
+      )
+    `);
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS sales (
+        id VARCHAR(32) PRIMARY KEY,
+        date DATETIME NOT NULL,
+        items JSON,
+        subtotal DECIMAL(10,2) NOT NULL,
+        discount DECIMAL(10,2) NOT NULL DEFAULT 0,
+        total DECIMAL(10,2) NOT NULL,
+        paymentMethod VARCHAR(20) NOT NULL DEFAULT 'Cash',
+        cashAmount DECIMAL(10,2) NOT NULL DEFAULT 0,
+        cardAmount DECIMAL(10,2) NOT NULL DEFAULT 0,
+        bankAmount DECIMAL(10,2) NOT NULL DEFAULT 0,
+        deliveryMethod VARCHAR(20) NOT NULL DEFAULT 'In Store',
+        deliveryFee DECIMAL(10,2) NOT NULL DEFAULT 0,
+        deliveryPaidTo VARCHAR(10) DEFAULT NULL,
+        business VARCHAR(30) NOT NULL DEFAULT 'Blingshop',
+        staffId VARCHAR(32),
+        staffName VARCHAR(100),
+        customerId VARCHAR(32),
+        customerName VARCHAR(100)
+      )
+    `);
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS sale_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        sale_id VARCHAR(32) NOT NULL,
+        product_id VARCHAR(32),
+        name VARCHAR(200),
+        price DECIMAL(10,2) NOT NULL DEFAULT 0,
+        paidPrice DECIMAL(10,2) DEFAULT NULL,
+        qty INT NOT NULL DEFAULT 1,
+        business VARCHAR(30) NOT NULL DEFAULT 'Blingshop'
+      )
+    `);
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS customers (
+        id VARCHAR(32) PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        phone VARCHAR(50),
+        email VARCHAR(100),
+        points INT DEFAULT 0,
+        notes TEXT,
+        created_at DATETIME
+      )
+    `);
+    await conn.query(`
       CREATE TABLE IF NOT EXISTS refunds (
         id VARCHAR(32) PRIMARY KEY,
         sale_id VARCHAR(32) NOT NULL,
@@ -431,6 +500,12 @@ async function initDB() {
         createdAt DATETIME NOT NULL,
         staffId VARCHAR(32),
         staffName VARCHAR(100)
+      )
+    `);
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS settings (
+        \`key\` VARCHAR(50) PRIMARY KEY,
+        value TEXT
       )
     `);
     await conn.query(`INSERT IGNORE INTO settings (\`key\`, value) VALUES ('zebra_ip', '')`);
