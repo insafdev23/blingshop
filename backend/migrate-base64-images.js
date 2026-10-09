@@ -11,6 +11,25 @@ if (fs.existsSync(backendEnv)) {
 const mysql = require("mysql2/promise");
 const { uploadImage, DRIVER } = require("./storage");
 
+const MIME_EXT = {
+  "image/jpeg": ".jpg",
+  "image/jpg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+};
+
+function parseDataUrl(dataUrl) {
+  if (!dataUrl || typeof dataUrl !== "string") return null;
+  const match = /^data:([^;]+);base64,([\s\S]+)$/.exec(dataUrl);
+  if (!match) return null;
+  const mime = match[1].toLowerCase();
+  return {
+    buffer: Buffer.from(match[2], "base64"),
+    ext: MIME_EXT[mime] || ".jpg",
+  };
+}
+
 async function runMigration() {
   console.log("──────────────────────────────────────────────────");
   console.log("  Base64 -> Storage URL Migration Script");
@@ -26,47 +45,59 @@ async function runMigration() {
     database: process.env.DB_NAME || "defaultdb",
     ssl: { rejectUnauthorized: false },
     waitForConnections: true,
-    connectionLimit: 5,
+    connectionLimit: 3,
+    connectTimeout: 30000,
   });
 
   const tables = ["products", "pending_products"];
   let totalMigrated = 0;
+  let totalFailed = 0;
 
   for (const table of tables) {
     try {
-      const [rows] = await pool.query(
-        `SELECT id, image FROM ${table} WHERE image LIKE 'data:image/%'`
+      // 1. Fetch ONLY the IDs of rows that need migration (lightweight query to avoid ECONNRESET)
+      const [idRows] = await pool.query(
+        `SELECT id FROM ${table} WHERE image LIKE 'data:%'`
       );
-      console.log(`\nScanning "${table}" table: found ${rows.length} base64 images to convert.`);
+      console.log(`\nScanning "${table}" table: found ${idRows.length} base64 images to convert.`);
 
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        const match = row.image.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/s);
-        if (!match) {
-          console.warn(`  [${i + 1}/${rows.length}] ID ${row.id}: Skipping (unrecognized data URL format)`);
-          continue;
-        }
-
-        const ext = match[1].toLowerCase() === "jpeg" ? "jpg" : match[1].toLowerCase();
-        const buffer = Buffer.from(match[2], "base64");
-        const filename = `${table}-${row.id}.${ext}`;
-
+      for (let i = 0; i < idRows.length; i++) {
+        const id = idRows[i].id;
         try {
-          const url = await uploadImage(buffer, filename);
-          await pool.query(`UPDATE ${table} SET image = ? WHERE id = ?`, [url, row.id]);
-          console.log(`  [${i + 1}/${rows.length}] ID ${row.id} -> ${url}`);
+          // 2. Fetch one row at a time
+          const [rows] = await pool.query(
+            `SELECT image FROM ${table} WHERE id = ?`,
+            [id]
+          );
+          if (!rows || rows.length === 0 || !rows[0].image) continue;
+
+          const parsed = parseDataUrl(rows[0].image);
+          if (!parsed) {
+            console.warn(`  [${i + 1}/${idRows.length}] ID ${id}: Skipping (invalid data URL)`);
+            totalFailed++;
+            continue;
+          }
+
+          const filename = `${table}-${id}${parsed.ext}`;
+          const url = await uploadImage(parsed.buffer, filename);
+
+          // 3. Update database row with clean URL
+          await pool.query(`UPDATE ${table} SET image = ? WHERE id = ?`, [url, id]);
+          console.log(`  [ok] [${i + 1}/${idRows.length}] ${table} id=${id} -> ${url}`);
           totalMigrated++;
-        } catch (err) {
-          console.error(`  [${i + 1}/${rows.length}] ID ${row.id} failed:`, err.message);
+        } catch (itemErr) {
+          console.error(`  [fail] [${i + 1}/${idRows.length}] ${table} id=${id}:`, itemErr.message);
+          totalFailed++;
         }
       }
     } catch (err) {
-      console.error(`Error processing table "${table}":`, err.message);
+      console.error(`Error scanning table "${table}":`, err.message);
     }
   }
 
   console.log("\n──────────────────────────────────────────────────");
-  console.log(`  Migration Complete! Successfully migrated ${totalMigrated} image(s).`);
+  console.log(`  Migration Complete!`);
+  console.log(`  Migrated: ${totalMigrated}, Failed: ${totalFailed}`);
   console.log("──────────────────────────────────────────────────");
 
   await pool.end();
