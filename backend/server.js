@@ -1,30 +1,33 @@
 const path = require("path");
-require("dotenv").config({ path: path.join(__dirname, ".env") });
+const fs = require("fs");
+// Load .env from backend directory if present, otherwise fallback to root .env
+const backendEnv = path.join(__dirname, ".env");
+if (fs.existsSync(backendEnv)) {
+  require("dotenv").config({ path: backendEnv });
+} else {
+  require("dotenv").config();
+}
 
 const express = require("express");
 const cors = require("cors");
 const mysql = require("mysql2/promise");
 const https = require("https");
 const http = require("http");
-const fs = require("fs");
 const net = require("net");
 const bcrypt = require("bcryptjs");
+const multer = require("multer");
+const { uploadImage } = require("./storage");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Strip leading /api prefix so routes match seamlessly on Vercel
 app.use((req, res, next) => {
-  if (req.url.startsWith('/api')) {
-    req.url = req.url.replace(/^\/api/, '');
-    if (!req.url || !req.url.startsWith('/')) {
-      req.url = '/' + req.url;
-    }
+  if (req.url.startsWith("/api")) {
+    req.url = req.url.replace(/^\/api/, "") || "/";
   }
   next();
 });
-
-// ... your route definitions come below here (e.g. app.post('/auth/login', ...))
 
 // ── SSL certs ────────────────────────────────────────────────────
 let sslOptions = null;
@@ -55,6 +58,9 @@ const pool = mysql.createPool({
 
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 function generateId() { return "ST" + Date.now().toString().slice(-6) + Math.floor(Math.random() * 90 + 10); }
 
@@ -327,6 +333,48 @@ app.put("/settings/:key", async (req, res) => {
     );
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Image upload ──────────────────────────────────────────────────
+app.post("/upload-image", upload.single("image"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No image file provided." });
+    const url = await uploadImage(req.file.buffer, req.file.originalname);
+    res.json({ url });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── One-time Base64 to Storage URL Migration ───────────────────────
+app.post("/migrate-images", async (req, res) => {
+  const tables = ["products", "pending_products"];
+  let totalMigrated = 0;
+  const results = [];
+
+  try {
+    for (const table of tables) {
+      const [rows] = await pool.query(
+        `SELECT id, image FROM ${table} WHERE image LIKE 'data:image/%'`
+      );
+      for (const row of rows) {
+        const match = row.image.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/s);
+        if (!match) continue;
+        const ext = match[1].toLowerCase() === "jpeg" ? "jpg" : match[1].toLowerCase();
+        const buffer = Buffer.from(match[2], "base64");
+        const filename = `${table}-${row.id}.${ext}`;
+        try {
+          const url = await uploadImage(buffer, filename);
+          await pool.query(`UPDATE ${table} SET image = ? WHERE id = ?`, [url, row.id]);
+          totalMigrated++;
+          results.push({ table, id: row.id, url, status: "success" });
+        } catch (err) {
+          results.push({ table, id: row.id, error: err.message, status: "failed" });
+        }
+      }
+    }
+    res.json({ success: true, totalMigrated, results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── Zebra ZPL Proxy ───────────────────────────────────────────────

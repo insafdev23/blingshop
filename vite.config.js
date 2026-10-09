@@ -21,6 +21,11 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      "/uploads": {
+        target: hasCerts ? "https://localhost:3001" : "http://localhost:3001",
+        changeOrigin: true,
+        secure: false,
+      },
     },
   },
 });

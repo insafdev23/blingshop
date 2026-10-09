@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { read as xlsxRead, utils as xlsxUtils, writeFile as xlsxWriteFile } from "xlsx";
 import JsBarcode from "jsbarcode";
 
@@ -78,6 +78,17 @@ async function apiFetch(path, options = {}) {
   // catch blocks actually fire for server-side rejections, not just network-level failures.
   if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
   return data;
+}
+
+// Multipart upload for product photos — separate from apiFetch because that
+// helper always JSON-encodes the body, which can't carry a file.
+async function uploadImageFile(file) {
+  const formData = new FormData();
+  formData.append("image", file);
+  const res = await fetch(`${API}/upload-image`, { method: "POST", body: formData });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Upload failed (${res.status})`);
+  return data.url;
 }
 
 function generateId() { return "BS" + Date.now().toString().slice(-6) + Math.floor(Math.random() * 90 + 10); }
@@ -802,10 +813,29 @@ function ProductForm({ initial, onSave, onCancel, existingProducts, customCatego
   const isEdit = !!initial;
   const [form, setForm] = useState(() => initial || { name: "", category: "Clothing", business: "Blingshop", price: "", cost: "", stock: "", image: "", sku: generateSKU("Clothing", "Blingshop", []) });
   const [skuEdited, setSkuEdited] = useState(isEdit);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageError, setImageError] = useState("");
   const fileRef = useRef();
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const handleCatOrBiz = (cat, biz) => { set("category", cat); set("business", biz); if (!skuEdited) set("sku", generateSKU(cat, biz, existingProducts)); };
-  const handleImage = e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => set("image", ev.target.result); r.readAsDataURL(f); };
+  const handleImage = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    // Show an instant local preview while the real upload happens in the background.
+    const localPreview = URL.createObjectURL(f);
+    set("image", localPreview);
+    setUploadingImage(true);
+    setImageError("");
+    try {
+      const url = await uploadImageFile(f);
+      set("image", url);
+    } catch (err) {
+      setImageError(`Could not upload photo — ${err.message || "check your connection and try again."}`);
+      set("image", "");
+    } finally {
+      setUploadingImage(false);
+      URL.revokeObjectURL(localPreview);
+    }
+  };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div>
@@ -838,9 +868,10 @@ function ProductForm({ initial, onSave, onCancel, existingProducts, customCatego
       <div>
         <label style={labelStyle}>Product Image</label>
         <div style={{ marginTop: 6, display: "flex", gap: 10, alignItems: "center" }}>
-          <button onClick={() => fileRef.current.click()} style={{ padding: "8px 16px", background: LIGHT, color: GOLD_DARK, border: `1px solid ${BORDER}`, borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>{Icons.camera} Upload Photo</button>
+          <button onClick={() => fileRef.current.click()} disabled={uploadingImage} style={{ padding: "8px 16px", background: LIGHT, color: GOLD_DARK, border: `1px solid ${BORDER}`, borderRadius: 8, cursor: uploadingImage ? "default" : "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>{Icons.camera} {uploadingImage ? "Uploading…" : "Upload Photo"}</button>
           {form.image && <img src={form.image} alt="" style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 8, border: `1px solid ${BORDER}` }} />}
         </div>
+        {imageError && <div style={{ fontSize: 11, color: "#DC2626", marginTop: 4 }}>{imageError}</div>}
         <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleImage} />
         <input value={form.image && !form.image.startsWith("data:") ? form.image : ""} onChange={e => set("image", e.target.value)} placeholder="Or paste image URL" style={{ ...inp, marginTop: 8, fontSize: 12, color: GRAY }} />
       </div>
@@ -852,7 +883,7 @@ function ProductForm({ initial, onSave, onCancel, existingProducts, customCatego
         </div>
       )}
       <div style={{ display: "flex", gap: 10, paddingTop: 4, borderTop: `1px solid ${GOLD_LIGHT}`, marginTop: 4 }}>
-        <button onClick={() => onSave(form)} style={{ flex: 1, padding: "11px", background: GOLD_DARK, color: WHITE, border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 14 }}>Save Product</button>
+        <button onClick={() => onSave(form)} disabled={uploadingImage} style={{ flex: 1, padding: "11px", background: GOLD_DARK, color: WHITE, border: "none", borderRadius: 8, cursor: uploadingImage ? "default" : "pointer", opacity: uploadingImage ? 0.6 : 1, fontWeight: 700, fontSize: 14 }}>{uploadingImage ? "Uploading photo…" : "Save Product"}</button>
         <button onClick={onCancel} style={{ padding: "11px 20px", background: LIGHT, color: GRAY, border: `1px solid #E5E7EB`, borderRadius: 8, cursor: "pointer", fontSize: 14 }}>Cancel</button>
       </div>
     </div>
@@ -985,6 +1016,7 @@ function BulkAddModal({ existingProducts, pendingProducts, onSave, onClose, blin
   const [saving, setSaving] = useState(false);
   const [savedCount, setSavedCount] = useState(0);
   const [saveError, setSaveError] = useState("");
+  const [uploadingImage, setUploadingImage] = useState(false);
   const cameraRef = useRef();
   const galleryRef = useRef();
 
@@ -1009,15 +1041,27 @@ function BulkAddModal({ existingProducts, pendingProducts, onSave, onClose, blin
   };
 
   const price = unknownCost ? (+manualPrice || 0) : quickAddPrice(business, costThb, rateInput);
-  const canSave = image && qty !== "" && +qty > 0 && (
+  const canSave = image && !uploadingImage && qty !== "" && +qty > 0 && (
     unknownCost ? manualPrice !== "" && +manualPrice > 0 : costThb !== "" && +costThb > 0 && +rateInput > 0
   );
 
-  const handleImage = e => {
+  const handleImage = async e => {
     const f = e.target.files[0]; if (!f) return;
-    const r = new FileReader();
-    r.onload = ev => setImage(ev.target.result);
-    r.readAsDataURL(f);
+    // Show an instant local preview while the real upload happens in the background.
+    const localPreview = URL.createObjectURL(f);
+    setImage(localPreview);
+    setUploadingImage(true);
+    setSaveError("");
+    try {
+      const url = await uploadImageFile(f);
+      setImage(url);
+    } catch (err) {
+      setSaveError(`Could not upload photo — ${err.message || "check your connection and try again."}`);
+      setImage("");
+    } finally {
+      setUploadingImage(false);
+      URL.revokeObjectURL(localPreview);
+    }
   };
 
   const reset = () => {
@@ -1111,8 +1155,9 @@ function BulkAddModal({ existingProducts, pendingProducts, onSave, onClose, blin
           <label style={labelStyle}>Product Photo</label>
           {image ? (
             <div style={{ marginTop: 6, position: "relative" }}>
-              <img src={image} alt="" style={{ width: "100%", maxHeight: 200, objectFit: "contain", borderRadius: 10, border: `1px solid ${BORDER}`, display: "block" }} />
-              <button onClick={() => setImage("")} style={{ position: "absolute", top: 8, right: 8, width: 28, height: 28, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: WHITE, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>{Icons.close}</button>
+              <img src={image} alt="" style={{ width: "100%", maxHeight: 200, objectFit: "contain", borderRadius: 10, border: `1px solid ${BORDER}`, display: "block", opacity: uploadingImage ? 0.6 : 1 }} />
+              {uploadingImage && <div style={{ position: "absolute", bottom: 8, left: 8, background: "rgba(0,0,0,0.7)", color: WHITE, fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 6 }}>Uploading…</div>}
+              {!uploadingImage && <button onClick={() => setImage("")} style={{ position: "absolute", top: 8, right: 8, width: 28, height: 28, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: WHITE, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>{Icons.close}</button>}
             </div>
           ) : (
             <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
