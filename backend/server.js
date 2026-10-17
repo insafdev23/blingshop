@@ -466,9 +466,10 @@ async function initDB() {
         name VARCHAR(100) NOT NULL,
         phone VARCHAR(50),
         email VARCHAR(100),
-        points INT DEFAULT 0,
+        birthday VARCHAR(20),
+        preferredBiz VARCHAR(30) NOT NULL DEFAULT 'Both',
         notes TEXT,
-        created_at DATETIME
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
     await conn.query(`
@@ -517,6 +518,64 @@ async function initDB() {
     if (costCol[0].c === 0) {
       await conn.query("ALTER TABLE products ADD COLUMN cost DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER price");
       console.log("Added 'cost' column to products table.");
+    }
+
+    // Add customerId and customerName to sales if they don't exist yet
+    const [custCol] = await conn.query(
+      "SELECT COUNT(*) as c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'sales' AND column_name = 'customerId'"
+    );
+    if (custCol[0].c === 0) {
+      await conn.query("ALTER TABLE sales ADD COLUMN customerId VARCHAR(32) DEFAULT NULL AFTER total");
+      console.log("Added 'customerId' column to sales table.");
+    }
+
+    const [custNameCol] = await conn.query(
+      "SELECT COUNT(*) as c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'sales' AND column_name = 'customerName'"
+    );
+    if (custNameCol[0].c === 0) {
+      await conn.query("ALTER TABLE sales ADD COLUMN customerName VARCHAR(100) DEFAULT NULL AFTER customerId");
+      console.log("Added 'customerName' column to sales table.");
+    }
+
+    const [staffIdCol] = await conn.query(
+      "SELECT COUNT(*) as c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'sales' AND column_name = 'staffId'"
+    );
+    if (staffIdCol[0].c === 0) {
+      await conn.query("ALTER TABLE sales ADD COLUMN staffId VARCHAR(32) DEFAULT NULL AFTER customerName");
+      console.log("Added 'staffId' column to sales table.");
+    }
+
+    const [staffNameCol] = await conn.query(
+      "SELECT COUNT(*) as c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'sales' AND column_name = 'staffName'"
+    );
+    if (staffNameCol[0].c === 0) {
+      await conn.query("ALTER TABLE sales ADD COLUMN staffName VARCHAR(100) DEFAULT NULL AFTER staffId");
+      console.log("Added 'staffName' column to sales table.");
+    }
+
+    // Add birthday, preferredBiz, createdAt to customers if they don't exist yet
+    const [bdayCol] = await conn.query(
+      "SELECT COUNT(*) as c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'customers' AND column_name = 'birthday'"
+    );
+    if (bdayCol[0].c === 0) {
+      await conn.query("ALTER TABLE customers ADD COLUMN birthday VARCHAR(20) DEFAULT NULL AFTER email");
+      console.log("Added 'birthday' column to customers table.");
+    }
+
+    const [prefCol] = await conn.query(
+      "SELECT COUNT(*) as c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'customers' AND column_name = 'preferredBiz'"
+    );
+    if (prefCol[0].c === 0) {
+      await conn.query("ALTER TABLE customers ADD COLUMN preferredBiz VARCHAR(30) NOT NULL DEFAULT 'Both' AFTER birthday");
+      console.log("Added 'preferredBiz' column to customers table.");
+    }
+
+    const [createdCol] = await conn.query(
+      "SELECT COUNT(*) as c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'customers' AND column_name = 'createdAt'"
+    );
+    if (createdCol[0].c === 0) {
+      await conn.query("ALTER TABLE customers ADD COLUMN createdAt DATETIME DEFAULT CURRENT_TIMESTAMP AFTER notes");
+      console.log("Added 'createdAt' column to customers table.");
     }
 
     // Add payment-tracking columns to sales if they don't exist yet (Cash / Card / Bank Transfer / Split)

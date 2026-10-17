@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "migrate:images": "node backend/migrate-base64-images.js",
     "extract:images": "node backend/extract-and-upload-to-blob.js",
-    "restore:clean": "node backend/restore-clean-data.js"
+    "restore:clean": "node backend/restore-clean-data.js",
+    "db:fix": "node backend/fix-missing-columns.js"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.1",

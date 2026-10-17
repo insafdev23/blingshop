@@ -98,6 +98,10 @@ async function restoreClean() {
         subtotal DECIMAL(10,2) NOT NULL,
         discount DECIMAL(10,2) NOT NULL DEFAULT 0,
         total DECIMAL(10,2) NOT NULL,
+        customerId VARCHAR(32),
+        customerName VARCHAR(100),
+        staffId VARCHAR(32),
+        staffName VARCHAR(100),
         paymentMethod VARCHAR(20) NOT NULL DEFAULT 'Cash',
         cashAmount DECIMAL(10,2) NOT NULL DEFAULT 0,
         cardAmount DECIMAL(10,2) NOT NULL DEFAULT 0,
@@ -105,9 +109,7 @@ async function restoreClean() {
         deliveryMethod VARCHAR(20) NOT NULL DEFAULT 'In Store',
         deliveryFee DECIMAL(10,2) NOT NULL DEFAULT 0,
         deliveryPaidTo VARCHAR(10) DEFAULT NULL,
-        business VARCHAR(30) NOT NULL DEFAULT 'Blingshop',
-        staffId VARCHAR(32),
-        staffName VARCHAR(100)
+        business VARCHAR(30) NOT NULL DEFAULT 'Blingshop'
       )
     `);
 
@@ -131,9 +133,10 @@ async function restoreClean() {
         name VARCHAR(100) NOT NULL,
         phone VARCHAR(50),
         email VARCHAR(100),
-        points INT DEFAULT 0,
+        birthday VARCHAR(20),
+        preferredBiz VARCHAR(30) NOT NULL DEFAULT 'Both',
         notes TEXT,
-        created_at DATETIME
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
