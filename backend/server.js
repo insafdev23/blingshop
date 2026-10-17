@@ -198,7 +198,14 @@ app.get("/sales", async (req, res) => {
   try {
     const [sales] = await pool.query("SELECT * FROM sales ORDER BY date DESC");
     const [items] = await pool.query("SELECT * FROM sale_items");
-    res.json(sales.map(s => ({ ...s, items: items.filter(i => i.sale_id === s.id) })));
+    res.json(sales.map(s => {
+      const lineItems = items.filter(i => i.sale_id === s.id);
+      let parsed = [];
+      try {
+        parsed = typeof s.items === "string" ? JSON.parse(s.items) : (s.items || []);
+      } catch {}
+      return { ...s, items: lineItems.length > 0 ? lineItems : parsed };
+    }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -209,8 +216,8 @@ app.post("/sales", async (req, res) => {
   try {
     await conn.beginTransaction();
     await conn.query(
-      "INSERT INTO sales (id, date, subtotal, discount, total, customerId, customerName, staffId, staffName, paymentMethod, cashAmount, cardAmount, bankAmount, deliveryMethod, deliveryFee, deliveryPaidTo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [id, mysqlDate, subtotal, discount, total, customerId || null, customerName || null, staffId || null, staffName || null, paymentMethod || "Cash", cashAmount || 0, cardAmount || 0, bankAmount || 0, deliveryMethod || "In Store", deliveryFee || 0, deliveryPaidTo || null]
+      "INSERT INTO sales (id, date, items, subtotal, discount, total, customerId, customerName, staffId, staffName, paymentMethod, cashAmount, cardAmount, bankAmount, deliveryMethod, deliveryFee, deliveryPaidTo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [id, mysqlDate, JSON.stringify(items || []), subtotal, discount, total, customerId || null, customerName || null, staffId || null, staffName || null, paymentMethod || "Cash", cashAmount || 0, cardAmount || 0, bankAmount || 0, deliveryMethod || "In Store", deliveryFee || 0, deliveryPaidTo || null]
     );
     for (const item of items) {
       await conn.query(
@@ -577,6 +584,11 @@ async function initDB() {
       await conn.query("ALTER TABLE customers ADD COLUMN createdAt DATETIME DEFAULT CURRENT_TIMESTAMP AFTER notes");
       console.log("Added 'createdAt' column to customers table.");
     }
+
+    // Ensure items column in sales is nullable so missing items never trigger strict mode errors
+    try {
+      await conn.query("ALTER TABLE sales MODIFY COLUMN items JSON NULL");
+    } catch (e) {}
 
     // Add payment-tracking columns to sales if they don't exist yet (Cash / Card / Bank Transfer / Split)
     const [payCol] = await conn.query(

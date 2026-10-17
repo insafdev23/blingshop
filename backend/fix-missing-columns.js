@@ -132,6 +132,14 @@ async function fixColumns() {
       }
     }
 
+    try {
+      console.log("Ensuring `sales.items` is nullable...");
+      await conn.query("ALTER TABLE sales MODIFY COLUMN items JSON NULL");
+      console.log("  ✅ Made `sales.items` nullable.");
+    } catch (err) {
+      console.warn("  Notice for `sales.items`:", err.message);
+    }
+
     console.log("\n──────────────────────────────────────────────────");
     console.log("  ✅ All table columns verified and up to date!");
     console.log("──────────────────────────────────────────────────");

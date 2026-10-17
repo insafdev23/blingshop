@@ -94,7 +94,7 @@ async function restoreClean() {
       CREATE TABLE IF NOT EXISTS sales (
         id VARCHAR(32) PRIMARY KEY,
         date DATETIME NOT NULL,
-        items JSON NOT NULL,
+        items JSON,
         subtotal DECIMAL(10,2) NOT NULL,
         discount DECIMAL(10,2) NOT NULL DEFAULT 0,
         total DECIMAL(10,2) NOT NULL,
